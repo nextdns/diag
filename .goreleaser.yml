@@ -1,0 +1,68 @@
+before:
+  hooks:
+    - go mod tidy
+builds:
+- 
+  goos:
+  - freebsd
+  - netbsd
+  - openbsd
+  - dragonfly
+  - linux
+  - darwin
+  - windows
+  goarch:
+  - 386
+  - amd64
+  - arm
+  - arm64
+  - mips
+  - mipsle
+  - mips64
+  - mips64le
+  goarm:
+  - 5
+  - 6
+  - 7
+  gomips:
+  - softfloat
+  - hardfloat
+  env:
+  - CGO_ENABLED=0
+archives:
+-
+  format_overrides:
+  -
+    goos: windows
+    format: zip
+  files:
+  - LICENSE
+  - README.md
+checksum:
+  name_template: 'checksums.txt'
+release:
+  name_template: "{{.ProjectName}}-v{{.Version}}"
+brews:
+-
+  github:
+    owner: nextdns
+    name: homebrew-tap
+  commit_author:
+    name: NextDNS Team
+    email: team@nextdns.io
+  homepage: https://nextdns.io
+  description: NextDNS DNS/53 to DoH Proxy
+  caveats: "To install NextDNS, run the following command:
+
+    sudo nextdns install --config <your_conf_id>
+
+Then setup your DNS manually to 127.0.0.1 or by running:
+
+    sudo nextdns activate
+"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
