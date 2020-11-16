@@ -85,7 +85,7 @@ func main() {
 	r.Secondary = pop("secondary IPv4", "45.90.30.0")
 	if r.HasV6 {
 		r.Primary6 = pop("primary IPv6", "2a07:a8c0::")
-		r.Secondary6 = pop("secondary IPv6", "2a07:a8c0::")
+		r.Secondary6 = pop("secondary IPv6", "2a07:a8c1::")
 	}
 	r.Top = pings(r.HasV6)
 
