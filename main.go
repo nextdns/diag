@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nextdns/diag/traceroute"
@@ -132,7 +133,10 @@ func trace(name string, dest string) []traceroute.Hop {
 	var t traceroute.Tracer
 	c := make(chan traceroute.Hop)
 	var hops []traceroute.Hop
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for hop := range c {
 			hops = append(hops, hop)
 			fmt.Println(indent(hop.String()))
@@ -142,6 +146,8 @@ func trace(name string, dest string) []traceroute.Hop {
 	if err != nil {
 		fmt.Printf(indent("error: %v\n"), err)
 	}
+	close(c)
+	wg.Wait()
 	return hops
 }
 
