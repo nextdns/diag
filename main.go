@@ -103,7 +103,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	req, _ := http.NewRequest("POST", "https://api.nextdns.io/diag", bytes.NewBuffer(b))
+	req, _ := http.NewRequest("POST", "https://api.nextdns.io/diagnostic", bytes.NewBuffer(b))
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
