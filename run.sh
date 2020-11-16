@@ -1,11 +1,26 @@
 #!/bin/sh
 
 main() {
+    set -e
+
+    echo
+    echo "Welcome to NextDNS network diagnostic tool."
+    echo
+    echo "This tool will download a small binary to capture latency and routing information"
+    echo "regarding the connectivity of your network with NextDNS. In order to perform a"
+    echo "traceroute, root permission is required. You may therefore be asked to provide"
+    echo "your password for sudo."
+    echo
+    echo "The source code of this tool is available at https://github.com/nextdns/diag"
+    echo
+    printf "Do you want to continue? (press enter to accept)"
+    read -r
+
     GOARCH=$(detect_goarch)
     GOOS=$(detect_goos)
     RELEASE=$(get_release)
 
-    url="https://github.com/nextdns/nextdns/releases/download/v${RELEASE}/nextdns_${RELEASE}_${GOOS}_${GOARCH}.tar.gz"
+    url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}.tar.gz"
     bin_path=$(mktemp)
     trap cleanup EXIT
     curl -sL "$url" | sh -c "tar Ozxf - diag > \"$bin_path\""
@@ -117,6 +132,14 @@ get_release() {
             log_error "Cannot get latest version: $out"
         fi
         echo "$v"
+    fi
+}
+
+esed() {
+    if (echo | sed -E '' >/dev/null 2>&1); then
+        sed -E "$@"
+    else
+        sed -r "$@"
     fi
 }
 
