@@ -186,6 +186,7 @@ func pop(name, ip string) Ping {
 	if err := j.Decode(&p); err != nil {
 		fmt.Printf(indent("Cannot decode response: %v\n"), err)
 	}
+	p.RTT *= 100
 	fmt.Println(indent(p.String()))
 	return p
 }
