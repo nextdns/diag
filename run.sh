@@ -23,7 +23,7 @@ main() {
     url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}.tar.gz"
     bin_path=$(mktemp)
     trap cleanup EXIT
-    curl -sL "$url" | sh -c "tar Ozxf - diag > \"$bin_path\""
+    curl -sL "$url" > "$bin_path"
     chmod 755 "$bin_path"
     asroot "$bin_path"
 }
