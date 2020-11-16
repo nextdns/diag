@@ -20,7 +20,7 @@ main() {
     GOOS=$(detect_goos)
     RELEASE=$(get_release)
 
-    url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}.tar.gz"
+    url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}"
     bin_path=$(mktemp)
     trap cleanup EXIT
     curl -sL "$url" > "$bin_path"
