@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -16,29 +18,29 @@ import (
 )
 
 type Report struct {
-	Contact string
+	Contact string `json:",omitempty"`
 	HasV6   bool
 	Test    Test
 
-	PrimaryTraceroute    []traceroute.Hop
-	SecondaryTraceroute  []traceroute.Hop
-	PrimaryTraceroute6   []traceroute.Hop
-	SecondaryTraceroute6 []traceroute.Hop
+	PrimaryTraceroute    []traceroute.Hop `json:",omitempty"`
+	SecondaryTraceroute  []traceroute.Hop `json:",omitempty"`
+	PrimaryTraceroute6   []traceroute.Hop `json:",omitempty"`
+	SecondaryTraceroute6 []traceroute.Hop `json:",omitempty"`
 
-	Primary    Ping
-	Secondary  Ping
-	Primary6   Ping
-	Secondary6 Ping
-	Top        []Ping
+	Primary    *Ping  `json:",omitempty"`
+	Secondary  *Ping  `json:",omitempty"`
+	Primary6   *Ping  `json:",omitempty"`
+	Secondary6 *Ping  `json:",omitempty"`
+	Top        []Ping `json:",omitempty"`
 }
 
 type Test struct {
 	Status   string
-	Protocol string
-	Client   string
-	Resolver string
-	DestIP   string
-	Server   string
+	Protocol string `json:",omitempty"`
+	Client   string `json:",omitempty"`
+	Resolver string `json:",omitempty"`
+	DestIP   string `json:",omitempty"`
+	Server   string `json:",omitempty"`
 }
 
 func (p Test) String() string {
@@ -56,7 +58,7 @@ func (p Test) String() string {
 }
 
 type Ping struct {
-	Pop      string
+	Pop      string `json:",omitempty"`
 	Protocol int
 	RTT      time.Duration
 }
@@ -113,7 +115,17 @@ func main() {
 	}
 	if res.StatusCode != http.StatusOK {
 		fmt.Printf("Post unsuccessful: status %d\n", res.StatusCode)
+		_, _ = io.Copy(os.Stderr, res.Body)
 		os.Exit(1)
+	}
+	result := struct {
+		ID string
+	}{}
+	j := json.NewDecoder(res.Body)
+	_ = j.Decode(&result)
+	fmt.Printf("Posted: %s\n", result.ID)
+	if runtime.GOOS == "windows" {
+		fmt.Scanln()
 	}
 }
 
@@ -170,7 +182,7 @@ func test() Test {
 	return t
 }
 
-func pop(name, ip string) Ping {
+func pop(name, ip string) *Ping {
 	fmt.Printf("Fetching PoP name for %s (%s)\n", name, ip)
 	req, _ := http.NewRequest("GET", "https://dns.nextdns.io/info", nil)
 	cl := http.Client{
@@ -184,7 +196,7 @@ func pop(name, ip string) Ping {
 	res, err := cl.Do(req)
 	if err != nil {
 		fmt.Printf("Fetch error: %v\n", err)
-		return Ping{}
+		return nil
 	}
 	defer res.Body.Close()
 	var p Ping
@@ -194,7 +206,7 @@ func pop(name, ip string) Ping {
 	}
 	p.RTT *= 100
 	fmt.Println(indent(p.String()))
-	return p
+	return &p
 }
 
 func pings(v6 bool) []Ping {
