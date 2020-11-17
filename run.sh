@@ -14,7 +14,7 @@ main() {
     echo "The source code of this tool is available at https://github.com/nextdns/diag"
     echo
     printf "Do you want to continue? (press enter to accept)"
-    read -r
+    read -r _
 
     GOARCH=$(detect_goarch)
     GOOS=$(detect_goos)
