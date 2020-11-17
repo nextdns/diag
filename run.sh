@@ -119,16 +119,12 @@ detect_goos() {
 }
 
 get_release() {
-    if [ "$NEXTDNS_VERSION" ]; then
-        echo "$NEXTDNS_VERSION"
-    else
-        out=$(curl -A curl -s "https://api.github.com/repos/nextdns/diag/releases/latest")
-        v=$(echo "$out" | grep '"tag_name":' | esed 's/.*"([^"]+)".*/\1/' | sed -e 's/^v//')
-        if [ -z "$v" ]; then
-            log_error "Cannot get latest version: $out"
-        fi
-        echo "$v"
+    out=$(curl -A curl -s "https://api.github.com/repos/nextdns/diag/releases/latest")
+    v=$(echo "$out" | grep '"tag_name":' | esed 's/.*"([^"]+)".*/\1/' | sed -e 's/^v//')
+    if [ -z "$v" ]; then
+        log_error "Cannot get latest version: $out"
     fi
+    echo "$v"
 }
 
 esed() {
