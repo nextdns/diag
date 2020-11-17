@@ -1,14 +1,3 @@
 # NextDNS Network Diagnostic
 
-To launch this tool:
-
-## Unix
-
-```
-sh -c 'sh -c "$(curl -sL https://nextdns.io/diag)"'
-```
-
-## Windows
-
-TODO
-
+[Usage Instructions](https://help.nextdns.io/en/articles/4633849-report-network-latency-issue)
