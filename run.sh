@@ -118,6 +118,14 @@ detect_goos() {
     esac
 }
 
+openssl_get() {
+    host=${1#https://*} # https://dom.com/path -> dom.com/path
+    path=/${host#*/}    # dom.com/path -> /path
+    host=${host%$path}  # dom.com/path -> dom.com
+    printf "GET %s HTTP/1.0\nHost: %s\nUser-Agent: curl\n\n" "$path" "$host" |
+    openssl s_client -quiet -connect "$host:443" 2>/dev/null
+}
+
 get_release() {
     if [ "$NEXTDNS_VERSION" ]; then
         echo "$NEXTDNS_VERSION"
