@@ -21,7 +21,7 @@ main() {
     RELEASE=$(get_release)
 
     url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}"
-    bin_path=$(mktemp)
+    bin_path=/tmp/nextdns-diag-$$
     trap cleanup EXIT
     curl -sL "$url" > "$bin_path"
     chmod 755 "$bin_path"
