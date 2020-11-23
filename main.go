@@ -75,6 +75,19 @@ type RouterTarget struct {
 }
 
 func main() {
+	if runtime.GOOS == "windows" {
+		fmt.Println("")
+		fmt.Println("Welcome to NextDNS network diagnostic tool.")
+		fmt.Println("")
+		fmt.Println("This tool will capture latency and routing information regarding")
+		fmt.Println("the connectivity of your network with NextDNS.")
+		fmt.Println("")
+		fmt.Println("The source code of this tool is available at https://github.com/nextdns/diag")
+		fmt.Println("")
+		fmt.Println("Do you want to continue? (press enter to accept)")
+		fmt.Scanln()
+	}
+
 	var r Report
 	r.HasV6 = hasIPv6()
 	r.Test = test()
@@ -106,7 +119,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	req, _ := http.NewRequest("POST", "https://api.nextdns.io/diagnostic", bytes.NewBuffer(b))
+	req, _ := http.NewRequest("POST", "http://localhost:8081/diagnostic", bytes.NewBuffer(b))
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
