@@ -119,11 +119,12 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	req, _ := http.NewRequest("POST", "http://localhost:8081/diagnostic", bytes.NewBuffer(b))
+	req, _ := http.NewRequest("POST", "https://api.nextdns.io/diagnostic", bytes.NewBuffer(b))
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		fmt.Printf("Post unsuccessful: %v\n", err)
+		fmt.Println("Please report this issue on https://github.com/nextdns/diag")
 		os.Exit(1)
 	}
 	if res.StatusCode != http.StatusOK {
