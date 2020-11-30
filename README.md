@@ -1,3 +1,3 @@
 # NextDNS Network Diagnostic
 
-[Usage Instructions](https://help.nextdns.io/en/articles/4633849-report-network-latency-issue)
+[Usage Instructions](https://help.nextdns.io/hc/en-us/articles/360017721239-Report-network-latency-issue)
