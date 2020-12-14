@@ -119,6 +119,7 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+	fmt.Print("Posting...\r")
 	req, _ := http.NewRequest("POST", "https://api.nextdns.io/diagnostic", bytes.NewBuffer(b))
 	req.Header.Set("Content-Type", "application/json")
 	res, err := http.DefaultClient.Do(req)
@@ -137,7 +138,7 @@ func main() {
 	}{}
 	j := json.NewDecoder(res.Body)
 	_ = j.Decode(&result)
-	fmt.Printf("Posted: %s\n", result.ID)
+	fmt.Printf("Posted: https://nextdns.io/diag/%s\n", result.ID)
 	if runtime.GOOS == "windows" {
 		fmt.Scanln()
 	}
