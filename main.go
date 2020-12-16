@@ -273,7 +273,7 @@ func ping(ip string) (p Ping) {
 	defer res.Body.Close()
 	j := json.NewDecoder(res.Body)
 	_ = j.Decode(&p)
-	p.RTT *= 100
+	p.RTT *= 1000
 	return p
 
 }
