@@ -214,7 +214,7 @@ func pop(name, ip string) *Ping {
 		return &Ping{
 			Pop:      "err: " + err.Error(),
 			Protocol: 0,
-			RTT:      -1,
+			RTT:      0,
 		}
 	}
 	defer res.Body.Close()
