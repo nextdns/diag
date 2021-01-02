@@ -211,7 +211,11 @@ func pop(name, ip string) *Ping {
 	res, err := cl.Do(req)
 	if err != nil {
 		fmt.Printf("Fetch error: %v\n", err)
-		return nil
+		return &Ping{
+			Pop:      "err: " + err.Error(),
+			Protocol: 0,
+			RTT:      -1,
+		}
 	}
 	defer res.Body.Close()
 	var p Ping
