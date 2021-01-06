@@ -22,16 +22,24 @@ type Report struct {
 	HasV6   bool
 	Test    Test
 
-	PrimaryTraceroute    []traceroute.Hop `json:",omitempty"`
-	SecondaryTraceroute  []traceroute.Hop `json:",omitempty"`
-	PrimaryTraceroute6   []traceroute.Hop `json:",omitempty"`
-	SecondaryTraceroute6 []traceroute.Hop `json:",omitempty"`
+	ULLPrimary    *Ping  `json:",omitempty"`
+	ULLSecondary  *Ping  `json:",omitempty"`
+	ULLPrimary6   *Ping  `json:",omitempty"`
+	ULLSecondary6 *Ping  `json:",omitempty"`
+	Primary       *Ping  `json:",omitempty"`
+	Secondary     *Ping  `json:",omitempty"`
+	Primary6      *Ping  `json:",omitempty"`
+	Secondary6    *Ping  `json:",omitempty"`
+	Top           []Ping `json:",omitempty"`
 
-	Primary    *Ping  `json:",omitempty"`
-	Secondary  *Ping  `json:",omitempty"`
-	Primary6   *Ping  `json:",omitempty"`
-	Secondary6 *Ping  `json:",omitempty"`
-	Top        []Ping `json:",omitempty"`
+	ULLPrimaryTraceroute    []traceroute.Hop `json:",omitempty"`
+	ULLSecondaryTraceroute  []traceroute.Hop `json:",omitempty"`
+	ULLPrimaryTraceroute6   []traceroute.Hop `json:",omitempty"`
+	ULLSecondaryTraceroute6 []traceroute.Hop `json:",omitempty"`
+	PrimaryTraceroute       []traceroute.Hop `json:",omitempty"`
+	SecondaryTraceroute     []traceroute.Hop `json:",omitempty"`
+	PrimaryTraceroute6      []traceroute.Hop `json:",omitempty"`
+	SecondaryTraceroute6    []traceroute.Hop `json:",omitempty"`
 }
 
 type Test struct {
@@ -91,19 +99,27 @@ func main() {
 	var r Report
 	r.HasV6 = hasIPv6()
 	r.Test = test()
-	r.PrimaryTraceroute = trace("primary IPv4", "45.90.28.0")
-	r.SecondaryTraceroute = trace("secondary IPv4", "45.90.30.0")
+	r.ULLPrimary = pop("ultra low latency primary IPv4", "ipv4.dns1.nextdns.io")
+	r.ULLSecondary = pop("ultra low latency secondary IPv4", "ipv4.dns2.nextdns.io")
+	r.Primary = pop("anycast primary IPv4", "45.90.28.0")
+	r.Secondary = pop("anycast secondary IPv4", "45.90.30.0")
 	if r.HasV6 {
-		r.PrimaryTraceroute6 = trace("primary IPv6", "2a07:a8c0::")
-		r.SecondaryTraceroute6 = trace("secondary IPv6", "2a07:a8c1::")
-	}
-	r.Primary = pop("primary IPv4", "45.90.28.0")
-	r.Secondary = pop("secondary IPv4", "45.90.30.0")
-	if r.HasV6 {
-		r.Primary6 = pop("primary IPv6", "2a07:a8c0::")
-		r.Secondary6 = pop("secondary IPv6", "2a07:a8c1::")
+		r.ULLPrimary6 = pop("ultra low latency primary IPv6", "ipv6.dns1.nextdns.io")
+		r.ULLSecondary6 = pop("ultra low latency secondary IPv6", "ipv6.dns2.nextdns.io")
+		r.Primary6 = pop("anycast primary IPv6", "2a07:a8c0::")
+		r.Secondary6 = pop("anycast secondary IPv6", "2a07:a8c1::")
 	}
 	r.Top = pings(r.HasV6)
+	r.ULLPrimaryTraceroute = trace("ultra low latency primary IPv4", "ipv4.dns1.nextdns.io")
+	r.ULLSecondaryTraceroute = trace("ultra low latency secondary IPv4", "ipv4.dns2.nextdns.io")
+	r.PrimaryTraceroute = trace("anycast primary IPv4", "45.90.28.0")
+	r.SecondaryTraceroute = trace("anycast secondary IPv4", "45.90.30.0")
+	if r.HasV6 {
+		r.ULLPrimaryTraceroute6 = trace("ultra low latency primary IPv6", "ipv6.dns1.nextdns.io")
+		r.ULLSecondaryTraceroute6 = trace("ultra low latency secondary IPv6", "ipv6.dns2.nextdns.io")
+		r.PrimaryTraceroute6 = trace("anycast primary IPv6", "2a07:a8c0::")
+		r.SecondaryTraceroute6 = trace("anycast secondary IPv6", "2a07:a8c1::")
+	}
 
 	fmt.Print("Do you want to send this report? [Y/n]: ")
 	var resp string
@@ -156,7 +172,20 @@ func hasIPv6() bool {
 }
 
 func trace(name string, dest string) []traceroute.Hop {
-	fmt.Printf("Traceroute for %s (%s)\n", name, dest)
+	ip := net.ParseIP(dest)
+	if ip == nil {
+		ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", dest)
+		if err != nil {
+			fmt.Printf(indent("Traceroute error: %v\n"), err)
+			return nil
+		}
+		if len(ips) == 0 {
+			fmt.Print(indent("Traceroute error: no IP for host\n"))
+			return nil
+		}
+		ip = ips[0]
+	}
+	fmt.Printf("Traceroute for %s (%s)\n", name, ip)
 	var t traceroute.Tracer
 	c := make(chan traceroute.Hop)
 	var hops []traceroute.Hop
@@ -169,7 +198,7 @@ func trace(name string, dest string) []traceroute.Hop {
 			fmt.Println(indent(hop.String()))
 		}
 	}()
-	err := t.Trace(context.Background(), net.ParseIP(dest), c)
+	err := t.Trace(context.Background(), ip, c)
 	if err != nil {
 		fmt.Printf(indent("error: %v\n"), err)
 	}
@@ -197,14 +226,14 @@ func test() Test {
 	return t
 }
 
-func pop(name, ip string) *Ping {
-	fmt.Printf("Fetching PoP name for %s (%s)\n", name, ip)
+func pop(name, target string) *Ping {
+	fmt.Printf("Fetching PoP name for %s (%s)\n", name, target)
 	req, _ := http.NewRequest("GET", "https://dns.nextdns.io/info", nil)
 	cl := http.Client{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network string, addr string) (net.Conn, error) {
 				d := net.Dialer{}
-				return d.DialContext(ctx, network, net.JoinHostPort(ip, "443"))
+				return d.DialContext(ctx, network, net.JoinHostPort(target, "443"))
 			},
 		},
 	}
