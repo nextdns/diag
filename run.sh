@@ -21,9 +21,15 @@ main() {
     RELEASE=$(get_release)
 
     url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}"
-    bin_path=/tmp/nextdns-diag-$$
+    bin_path=$(mktemp -t nextdns-diag)
     trap cleanup EXIT
-    curl -sL "$url" > "$bin_path"
+    if ! curl -sfL "$url" > "$bin_path"; then
+        echo "Failed to download binary"
+        echo
+        echo "GET $url"
+        curl -i "$url"
+        exit 1
+    fi
     chmod 755 "$bin_path"
     asroot "$bin_path"
 }
