@@ -14,13 +14,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nextdns/nextdns/host"
 	"github.com/nextdns/diag/traceroute"
 )
 
 type Report struct {
-	Contact string `json:",omitempty"`
-	HasV6   bool
-	Test    Test
+	Contact   string `json:",omitempty"`
+	HasV6     bool
+	Resolvers []string
+	Test      Test
 
 	ULLPrimary    *Ping  `json:",omitempty"`
 	ULLSecondary  *Ping  `json:",omitempty"`
@@ -97,6 +99,16 @@ func main() {
 	}
 
 	var r Report
+
+	if r.Resolvers = host.DNS(); len(r.Resolvers) > 0 {
+		fmt.Println("Resolvers: ", strings.Join(r.Resolvers, ", "))
+		net.DefaultResolver.PreferGo = true
+		d := &net.Dialer{}
+		net.DefaultResolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+			return d.DialContext(ctx, network, net.JoinHostPort(r.Resolvers[0], "53"))
+		}
+	}
+
 	r.HasV6 = hasIPv6()
 	r.Test = test()
 	r.ULLPrimary = pop("ultra low latency primary IPv4", "ipv4.dns1.nextdns.io")

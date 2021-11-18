@@ -27,6 +27,10 @@ builds:
   gomips:
   - softfloat
   - hardfloat
+  ignore:
+  -
+    goos: windows
+    goarch: arm64
   env:
   - CGO_ENABLED=0
 archives:
