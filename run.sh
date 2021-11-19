@@ -21,7 +21,7 @@ main() {
     RELEASE=$(get_release)
 
     url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}"
-    bin_path=$(mktemp -t nextdns-diag-XXX)
+    bin_path=$(mktemp -t nextdns-diag-XXXXXX)
     trap cleanup EXIT
     if ! curl -sfL "$url" > "$bin_path"; then
         echo "Failed to download binary"
