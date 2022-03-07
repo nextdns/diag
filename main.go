@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nextdns/nextdns/host"
 	"github.com/nextdns/diag/traceroute"
+	"github.com/nextdns/nextdns/host"
 )
 
 type Report struct {
@@ -49,6 +49,7 @@ type Test struct {
 	Protocol string `json:",omitempty"`
 	Client   string `json:",omitempty"`
 	Resolver string `json:",omitempty"`
+	SrcIP    string `json:",omitempty"`
 	DestIP   string `json:",omitempty"`
 	Server   string `json:",omitempty"`
 }
@@ -233,6 +234,9 @@ func test() Test {
 	j := json.NewDecoder(res.Body)
 	if err := j.Decode(&t); err != nil {
 		fmt.Printf(indent("Cannot decode response: %v\n"), err)
+	}
+	if t.Client == "" {
+		t.Client, t.SrcIP = t.SrcIP, ""
 	}
 	fmt.Println(indent(t.String()))
 	return t
