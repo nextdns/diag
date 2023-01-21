@@ -175,7 +175,7 @@ func main() {
 
 func hasIPv6() bool {
 	fmt.Println("Testing IPv6 connectivity")
-	c, err := net.Dial("tcp", "[2a00:1450:4007:80a::2013]:80")
+	c, err := net.Dial("tcp", "ipv6.test-ipv6.is:80")
 	if c != nil {
 		c.Close()
 	}
