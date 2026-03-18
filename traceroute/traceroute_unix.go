@@ -23,12 +23,9 @@ type packetInfo struct {
 }
 
 func (t *Tracer) Trace(ctx context.Context, dest net.IP, c chan Hop) error {
-	family := 4
-	if dest.To4() == nil {
-		family = 6
-	}
+	cfg := t.traceConfig(dest)
 
-	conn, err := newPacketConn(family)
+	conn, err := newPacketConn(cfg.family)
 	if err != nil {
 		return err
 	}
@@ -37,34 +34,15 @@ func (t *Tracer) Trace(ctx context.Context, dest net.IP, c chan Hop) error {
 }
 
 func (t *Tracer) traceWithConn(ctx context.Context, dest net.IP, c chan Hop, conn packetConn) error {
-	family := 4
-	if dest.To4() == nil {
-		family = 6
-	}
+	cfg := t.traceConfig(dest)
+	family := cfg.family
 	dst := net.IPAddr{IP: dest}
-
-	packetSize := t.PacketSize
-	if packetSize == 0 {
-		packetSize = DefaultPacketSize
-	}
-	maxHops := t.MaxHops
-	if maxHops == 0 {
-		maxHops = DefaultMaxHops
-	}
-	hopTimeout := t.HopTimeout
-	if hopTimeout == 0 {
-		hopTimeout = DefaultHopTimeout
-	}
-	probes := t.Probes
-	if probes == 0 {
-		probes = DefaultProbes
-	}
 
 	// Prepare ICMP packet.
 	id := rand.Intn(0xffff)
 	wmb := icmp.Echo{
 		ID:   id,
-		Data: make([]byte, packetSize),
+		Data: make([]byte, cfg.packetSize),
 	}
 	wm := icmp.Message{
 		Type: icmpEchoType(family),
@@ -83,42 +61,13 @@ func (t *Tracer) traceWithConn(ctx context.Context, dest net.IP, c chan Hop, con
 		case <-done:
 		}
 	}()
-
-	hops := make([]Hop, maxHops)
-	for i := range hops {
-		hops[i].Seq = i + 1
-	}
-
-	lastHop := maxHops
-	complete := false
-	for round := 0; round < probes; round++ {
-		hopLimit := maxHops
-		if complete {
-			hopLimit = lastHop
-		}
-		for ttl := 1; ttl <= hopLimit; ttl++ {
-			info, last, err := t.probe(ctx, conn, family, ttl, &dst, &wm, &wmb, seq, hopTimeout)
-			if err != nil {
-				return err
-			}
+	return t.traceWithFunc(ctx, cfg, c, func(ttl int, timeout time.Duration) (HopInfo, bool, error) {
+		info, last, err := t.probe(ctx, conn, family, ttl, &dst, &wm, &wmb, seq, timeout)
+		if err == nil {
 			seq++
-			hops[ttl-1].Info = append(hops[ttl-1].Info, info)
-			if last {
-				complete = true
-				lastHop = ttl
-				break
-			}
 		}
-	}
-
-	if complete {
-		hops = hops[:lastHop]
-	}
-	for _, hop := range hops {
-		c <- hop
-	}
-
-	return nil
+		return info, last, err
+	})
 }
 
 func (t *Tracer) probe(ctx context.Context, conn packetConn, family int, ttl int, dst net.Addr, wm *icmp.Message, wmb *icmp.Echo, seq uint16, timeout time.Duration) (HopInfo, bool, error) {
