@@ -279,7 +279,7 @@ func runTraceroute(ip net.IP) traceResult {
 
 func runTraceback(ip net.IP) traceResult {
 	hops, err := traceback.Fetch(&http.Client{
-		Timeout: 30 * time.Second,
+		Timeout: 2 * time.Minute,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				d := net.Dialer{}
