@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nextdns/diag/traceback"
 	"github.com/nextdns/diag/traceroute"
 	"github.com/nextdns/nextdns/host"
 )
@@ -42,6 +43,15 @@ type Report struct {
 	SecondaryTraceroute     []traceroute.Hop `json:",omitempty"`
 	PrimaryTraceroute6      []traceroute.Hop `json:",omitempty"`
 	SecondaryTraceroute6    []traceroute.Hop `json:",omitempty"`
+
+	ULLPrimaryTraceback    []traceroute.Hop `json:",omitempty"`
+	ULLSecondaryTraceback  []traceroute.Hop `json:",omitempty"`
+	ULLPrimaryTraceback6   []traceroute.Hop `json:",omitempty"`
+	ULLSecondaryTraceback6 []traceroute.Hop `json:",omitempty"`
+	PrimaryTraceback       []traceroute.Hop `json:",omitempty"`
+	SecondaryTraceback     []traceroute.Hop `json:",omitempty"`
+	PrimaryTraceback6      []traceroute.Hop `json:",omitempty"`
+	SecondaryTraceback6    []traceroute.Hop `json:",omitempty"`
 }
 
 type Test struct {
@@ -123,15 +133,15 @@ func main() {
 		r.Secondary6 = pop("anycast secondary IPv6", "2a07:a8c1::")
 	}
 	r.Top = pings(r.HasV6)
-	r.ULLPrimaryTraceroute = trace("ultra low latency primary IPv4", "ipv4.dns1.nextdns.io")
-	r.ULLSecondaryTraceroute = trace("ultra low latency secondary IPv4", "ipv4.dns2.nextdns.io")
-	r.PrimaryTraceroute = trace("anycast primary IPv4", "45.90.28.0")
-	r.SecondaryTraceroute = trace("anycast secondary IPv4", "45.90.30.0")
+	r.ULLPrimaryTraceroute, r.ULLPrimaryTraceback = trace("ultra low latency primary IPv4", "ipv4.dns1.nextdns.io")
+	r.ULLSecondaryTraceroute, r.ULLSecondaryTraceback = trace("ultra low latency secondary IPv4", "ipv4.dns2.nextdns.io")
+	r.PrimaryTraceroute, r.PrimaryTraceback = trace("anycast primary IPv4", "45.90.28.0")
+	r.SecondaryTraceroute, r.SecondaryTraceback = trace("anycast secondary IPv4", "45.90.30.0")
 	if r.HasV6 {
-		r.ULLPrimaryTraceroute6 = trace("ultra low latency primary IPv6", "ipv6.dns1.nextdns.io")
-		r.ULLSecondaryTraceroute6 = trace("ultra low latency secondary IPv6", "ipv6.dns2.nextdns.io")
-		r.PrimaryTraceroute6 = trace("anycast primary IPv6", "2a07:a8c0::")
-		r.SecondaryTraceroute6 = trace("anycast secondary IPv6", "2a07:a8c1::")
+		r.ULLPrimaryTraceroute6, r.ULLPrimaryTraceback6 = trace("ultra low latency primary IPv6", "ipv6.dns1.nextdns.io")
+		r.ULLSecondaryTraceroute6, r.ULLSecondaryTraceback6 = trace("ultra low latency secondary IPv6", "ipv6.dns2.nextdns.io")
+		r.PrimaryTraceroute6, r.PrimaryTraceback6 = trace("anycast primary IPv6", "2a07:a8c0::")
+		r.SecondaryTraceroute6, r.SecondaryTraceback6 = trace("anycast secondary IPv6", "2a07:a8c1::")
 	}
 
 	fmt.Print("Do you want to send this report? [Y/n]: ")
@@ -184,40 +194,108 @@ func hasIPv6() bool {
 	return v6
 }
 
-func trace(name string, dest string) []traceroute.Hop {
-	ip := net.ParseIP(dest)
-	if ip == nil {
-		ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", dest)
-		if err != nil {
-			fmt.Printf(indent("Traceroute error: %v\n"), err)
-			return nil
-		}
-		if len(ips) == 0 {
-			fmt.Print(indent("Traceroute error: no IP for host\n"))
-			return nil
-		}
-		ip = ips[0]
+type traceResult struct {
+	hops  []traceroute.Hop
+	lines []string
+	err   error
+}
+
+func trace(name string, dest string) ([]traceroute.Hop, []traceroute.Hop) {
+	ip, err := resolveIP(dest)
+	if err != nil {
+		fmt.Printf(indent("Traceroute error: %v\n"), err)
+		return nil, nil
 	}
+	fmt.Printf("Processing traceroute and traceback for %s (%s)\n", name, ip)
+	var wg sync.WaitGroup
+	var traceRes, tracebackRes traceResult
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		traceRes = runTraceroute(ip)
+	}()
+	go func() {
+		defer wg.Done()
+		tracebackRes = runTraceback(ip)
+	}()
+	wg.Wait()
+
 	fmt.Printf("Traceroute for %s (%s)\n", name, ip)
+	for _, line := range traceRes.lines {
+		fmt.Println(indent(line))
+	}
+	if traceRes.err != nil {
+		fmt.Printf(indent("error: %v\n"), traceRes.err)
+	}
+
+	fmt.Printf("Traceback for %s (%s)\n", name, ip)
+	for _, line := range tracebackRes.lines {
+		fmt.Println(indent(line))
+	}
+	if tracebackRes.err != nil {
+		fmt.Printf(indent("error: %v\n"), tracebackRes.err)
+	}
+
+	return traceRes.hops, tracebackRes.hops
+}
+
+func resolveIP(dest string) (net.IP, error) {
+	if ip := net.ParseIP(dest); ip != nil {
+		return ip, nil
+	}
+	ips, err := net.DefaultResolver.LookupIP(context.Background(), "ip", dest)
+	if err != nil {
+		return nil, err
+	}
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("no IP for host")
+	}
+	return ips[0], nil
+}
+
+func runTraceroute(ip net.IP) traceResult {
 	var t traceroute.Tracer
 	c := make(chan traceroute.Hop)
 	var hops []traceroute.Hop
+	var lines []string
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		for hop := range c {
 			hops = append(hops, hop)
-			fmt.Println(indent(hop.String()))
+			lines = append(lines, hop.String())
 		}
 	}()
 	err := t.Trace(context.Background(), ip, c)
-	if err != nil {
-		fmt.Printf(indent("error: %v\n"), err)
-	}
 	close(c)
 	wg.Wait()
-	return hops
+	return traceResult{
+		hops:  hops,
+		lines: lines,
+		err:   err,
+	}
+}
+
+func runTraceback(ip net.IP) traceResult {
+	hops, err := traceback.Fetch(&http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				d := net.Dialer{}
+				return d.DialContext(ctx, network, net.JoinHostPort(ip.String(), "443"))
+			},
+		},
+	}, "https://dns.nextdns.io/traceback")
+	lines := make([]string, 0, len(hops))
+	for _, hop := range hops {
+		lines = append(lines, hop.String())
+	}
+	return traceResult{
+		hops:  hops,
+		lines: lines,
+		err:   err,
+	}
 }
 
 func test() Test {
