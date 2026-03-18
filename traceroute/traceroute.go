@@ -11,12 +11,14 @@ const (
 	DefaultPacketSize = 52
 	DefaultHopTimeout = 5 * time.Second
 	DefaultMaxHops    = 20
+	DefaultProbes     = 3
 )
 
 type Tracer struct {
 	PacketSize uint16
 	HopTimeout time.Duration
 	MaxHops    int
+	Probes     int
 }
 
 // Hop represents a network hop in a traceroute result
