@@ -5,6 +5,8 @@ package traceroute
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net"
 	"reflect"
 	"strings"
@@ -94,11 +96,8 @@ func TestTraceWithConnTimeoutDoesNotResetOnUnmatchedPacket(t *testing.T) {
 	if got, want := hops[0].RTTs(), []time.Duration{-1}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("RTTs = %v, want %v", got, want)
 	}
-	if len(conn.deadlines) < 2 {
-		t.Fatalf("expected at least two deadlines, got %d", len(conn.deadlines))
-	}
-	if !conn.deadlines[0].Equal(conn.deadlines[1]) {
-		t.Fatalf("deadline reset from %v to %v", conn.deadlines[0], conn.deadlines[1])
+	if len(conn.deadlines) != 1 {
+		t.Fatalf("expected one fixed deadline, got %d", len(conn.deadlines))
 	}
 }
 
@@ -124,6 +123,84 @@ func TestTraceWithConnPropagatesParseErrors(t *testing.T) {
 		t.Fatalf("Trace() error = %v, want parse error", err)
 	}
 }
+
+func TestTraceWithConnBoundsBlockedIO(t *testing.T) {
+	for _, phase := range []string{"write", "read"} {
+		for _, overallTimeout := range []bool{false, true} {
+			name := phase + "/probe timeout"
+			if overallTimeout {
+				name = phase + "/overall timeout"
+			}
+			t.Run(name, func(t *testing.T) {
+				local, peer := net.Pipe()
+				defer local.Close()
+				defer peer.Close()
+				conn := &pipePacketConn{Conn: local}
+				if phase == "read" {
+					// Accept probes without sending replies, so only reads stall.
+					go io.Copy(io.Discard, peer)
+				}
+				ctx := context.Background()
+				hopTimeout := 20 * time.Millisecond
+				if overallTimeout {
+					var cancel context.CancelFunc
+					ctx, cancel = context.WithTimeout(ctx, 20*time.Millisecond)
+					defer cancel()
+					hopTimeout = time.Minute
+				}
+				tr := Tracer{MaxHops: 1, Probes: 1, HopTimeout: hopTimeout}
+				c := make(chan Hop, 1)
+				done := make(chan error, 1)
+				go func() {
+					done <- tr.traceWithConn(ctx, net.IPv4(203, 0, 113, 1), c, conn)
+				}()
+				select {
+				case err := <-done:
+					if overallTimeout {
+						if !errors.Is(err, context.DeadlineExceeded) {
+							t.Fatalf("error = %v, want context.DeadlineExceeded", err)
+						}
+						deadline, _ := ctx.Deadline()
+						if !conn.deadline.Equal(deadline) {
+							t.Fatalf("I/O deadline = %v, want %v", conn.deadline, deadline)
+						}
+					} else {
+						if err != nil {
+							t.Fatalf("error = %v", err)
+						}
+						if len(c) != 1 || (<-c).Info[0].RTT != -1 {
+							t.Fatal("probe timeout did not produce a missing sample")
+						}
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("Trace blocked past its timeout")
+				}
+			})
+		}
+	}
+}
+
+// Use real Go connection deadlines to exercise stalled I/O without raw sockets.
+type pipePacketConn struct {
+	net.Conn
+	deadline time.Time
+}
+
+func (c *pipePacketConn) Write(b []byte, _ net.Addr) (int, error) {
+	return c.Conn.Write(b)
+}
+
+func (c *pipePacketConn) Read(b []byte) (int, net.Addr, error) {
+	n, err := c.Conn.Read(b)
+	return n, nil, err
+}
+
+func (c *pipePacketConn) SetDeadline(deadline time.Time) error {
+	c.deadline = deadline
+	return c.Conn.SetDeadline(deadline)
+}
+
+func (c *pipePacketConn) SetHopLimit(int) error { return nil }
 
 func collectTrace(t Tracer, dest net.IP, conn packetConn) ([]Hop, error) {
 	size := t.MaxHops
@@ -197,7 +274,7 @@ func (c *fakePacketConn) Read(b []byte) (int, net.Addr, error) {
 	return n, action.addr, nil
 }
 
-func (c *fakePacketConn) SetReadDeadline(deadline time.Time) error {
+func (c *fakePacketConn) SetDeadline(deadline time.Time) error {
 	c.deadlines = append(c.deadlines, deadline)
 	return nil
 }

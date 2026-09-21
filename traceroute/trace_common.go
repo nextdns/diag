@@ -57,18 +57,22 @@ func (t *Tracer) traceWithFunc(ctx context.Context, cfg traceConfig, c chan Hop,
 
 	lastHop := cfg.maxHops
 	complete := false
+	var traceErr error
+traceLoop:
 	for round := 0; round < cfg.probes; round++ {
 		hopLimit := cfg.maxHops
 		if complete {
 			hopLimit = lastHop
 		}
 		for ttl := 1; ttl <= hopLimit; ttl++ {
-			if err := ctx.Err(); err != nil {
-				return err
+			if err := traceContextError(ctx); err != nil {
+				traceErr = err
+				break traceLoop
 			}
 			info, last, err := probe(ttl, cfg.hopTimeout)
 			if err != nil {
-				return err
+				traceErr = err
+				break traceLoop
 			}
 			hops[ttl-1].Info = append(hops[ttl-1].Info, info)
 			if last {
@@ -83,7 +87,38 @@ func (t *Tracer) traceWithFunc(ctx context.Context, cfg traceConfig, c chan Hop,
 		hops = hops[:lastHop]
 	}
 	for _, hop := range hops {
-		c <- hop
+		if len(hop.Info) == 0 {
+			continue
+		}
+		// Preserve partial results after cancellation when the caller has room
+		// for them, but never wait for a receiver on a canceled context.
+		select {
+		case c <- hop:
+			continue
+		default:
+		}
+		select {
+		case c <- hop:
+		case <-ctx.Done():
+			if traceErr != nil {
+				return traceErr
+			}
+			return ctx.Err()
+		}
+	}
+	if traceErr != nil {
+		return traceErr
+	}
+	return traceContextError(ctx)
+}
+
+func traceContextError(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	// An I/O deadline can fire before the context's timer is scheduled.
+	if deadline, ok := ctx.Deadline(); ok && !time.Now().Before(deadline) {
+		return context.DeadlineExceeded
 	}
 	return nil
 }

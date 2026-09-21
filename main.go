@@ -254,22 +254,19 @@ func resolveIP(dest string) (net.IP, error) {
 }
 
 func runTraceroute(ip net.IP) traceResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 	var t traceroute.Tracer
-	c := make(chan traceroute.Hop)
+	// Trace can return every collected hop without blocking after cancellation.
+	c := make(chan traceroute.Hop, traceroute.DefaultMaxHops)
+	err := t.Trace(ctx, ip, c)
+	close(c)
 	var hops []traceroute.Hop
 	var lines []string
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for hop := range c {
-			hops = append(hops, hop)
-			lines = append(lines, hop.String())
-		}
-	}()
-	err := t.Trace(context.Background(), ip, c)
-	close(c)
-	wg.Wait()
+	for hop := range c {
+		hops = append(hops, hop)
+		lines = append(lines, hop.String())
+	}
 	return traceResult{
 		hops:  hops,
 		lines: lines,

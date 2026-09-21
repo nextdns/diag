@@ -80,24 +80,33 @@ func (t *Tracer) probe(ctx context.Context, conn packetConn, family int, ttl int
 		return HopInfo{}, false, fmt.Errorf("cannot set hop limit: %v", err)
 	}
 	start := time.Now()
-	if _, err := conn.Write(wb, dst); err != nil {
-		return HopInfo{}, false, fmt.Errorf("cannot write ICMP packet: %v", err)
-	}
 	deadline := start.Add(timeout)
-	for {
-		if err := ctx.Err(); err != nil {
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return HopInfo{}, false, fmt.Errorf("cannot set deadline: %v", err)
+	}
+	if _, err := conn.Write(wb, dst); err != nil {
+		if err := traceContextError(ctx); err != nil {
 			return HopInfo{}, false, err
 		}
-		if err := conn.SetReadDeadline(deadline); err != nil {
-			return HopInfo{}, false, fmt.Errorf("cannot set read deadline: %v", err)
+		if isTimeout(err) {
+			return HopInfo{RTT: -1}, false, nil
+		}
+		return HopInfo{}, false, fmt.Errorf("cannot write ICMP packet: %v", err)
+	}
+	for {
+		if err := traceContextError(ctx); err != nil {
+			return HopInfo{}, false, err
 		}
 		p, err := readPacket(conn, family)
 		if err != nil {
+			if err := traceContextError(ctx); err != nil {
+				return HopInfo{}, false, err
+			}
 			if isTimeout(err) {
 				return HopInfo{RTT: -1}, false, nil
-			}
-			if err := ctx.Err(); err != nil {
-				return HopInfo{}, false, err
 			}
 			return HopInfo{}, false, err
 		}

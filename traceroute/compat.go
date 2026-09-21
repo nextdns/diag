@@ -22,7 +22,7 @@ type packetConn interface {
 	io.Closer
 	Write([]byte, net.Addr) (int, error)
 	Read(b []byte) (n int, src net.Addr, err error)
-	SetReadDeadline(t time.Time) error
+	SetDeadline(t time.Time) error
 	SetHopLimit(hoplim int) error
 }
 
