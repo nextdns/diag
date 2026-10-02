@@ -277,7 +277,7 @@ func pop(name, target string) *Ping {
 
 func pings(v6 bool) []Ping {
 	fmt.Println("Pinging PoPs")
-	res, err := http.Get("https://router.nextdns.io/?limit=10&stack=dual")
+	res, err := http.Get("https://dns.nextdns.io/servers")
 	if err != nil {
 		fmt.Printf(indent("error: %v\n"), err)
 		return nil
