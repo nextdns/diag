@@ -21,17 +21,52 @@ main() {
     RELEASE=$(get_release)
 
     url="https://github.com/nextdns/diag/releases/download/v${RELEASE}/diag_${RELEASE}_${GOOS}_${GOARCH}"
-    bin_path=$(mktemp -t nextdns-diag-XXXXXX)
-    trap cleanup EXIT
-    if ! curl -sfL "$url" > "$bin_path"; then
+    # select_bin sets bin_path and BIN_STABLE in this shell. A command
+    # substitution would drop BIN_STABLE.
+    select_bin
+    if [ "$BIN_STABLE" = 1 ]; then
+        mkdir -p "$(dirname "$bin_path")"
+        chmod 700 "$(dirname "$bin_path")" 2>/dev/null || true
+        echo "Using $bin_path"
+        echo "If a firewall prompts for this program, allow it. Later runs reuse this path."
+        download="$bin_path.download"
+        trap 'rm -f "$download"' EXIT
+    else
+        download=$bin_path
+        trap cleanup EXIT
+    fi
+    if ! curl -sfL "$url" > "$download"; then
         echo "Failed to download binary"
         echo
         echo "GET $url"
         curl -i "$url"
         exit 1
     fi
-    chmod 755 "$bin_path"
+    chmod 755 "$download"
+    if [ "$BIN_STABLE" = 1 ]; then
+        mv -f "$download" "$bin_path"
+        trap - EXIT
+    fi
     asroot "$bin_path"
+}
+
+# macOS firewalls such as Little Snitch match an unsigned program by its path.
+# A fresh mktemp name is a new program on every run, so the user must allow it
+# again and the in-flight connection is reset before they can click Allow.
+stable_bin_path() {
+    if [ "$(uname -s)" != "Darwin" ] || [ -z "$HOME" ]; then
+        return 1
+    fi
+    printf '%s\n' "${HOME}/Library/Caches/nextdns/nextdns-diag"
+}
+
+select_bin() {
+    if bin_path=$(stable_bin_path); then
+        BIN_STABLE=1
+        return 0
+    fi
+    BIN_STABLE=0
+    bin_path=$(mktemp -t nextdns-diag-XXXXXX)
 }
 
 cleanup() {
@@ -184,4 +219,7 @@ log_error() {
     printf "\033[31mERROR: %s\033[0m\n" "$*" >&2
 }
 
-main
+# Tests source this file with RUN_SH_LIB=1 and call the functions directly.
+if [ -z "${RUN_SH_LIB:-}" ]; then
+    main
+fi
