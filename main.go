@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -85,18 +86,14 @@ type RouterTarget struct {
 }
 
 func main() {
-	if runtime.GOOS == "windows" {
-		fmt.Println("")
-		fmt.Println("Welcome to NextDNS network diagnostic tool.")
-		fmt.Println("")
-		fmt.Println("This tool will capture latency and routing information regarding")
-		fmt.Println("the connectivity of your network with NextDNS.")
-		fmt.Println("")
-		fmt.Println("The source code of this tool is available at https://github.com/nextdns/diag")
-		fmt.Println("")
-		fmt.Println("Do you want to continue? (press enter to accept)")
-		fmt.Scanln()
+	yes, email, err := parseCLI(os.Args[1:])
+	if err == flag.ErrHelp {
+		os.Exit(0)
 	}
+	if err != nil {
+		os.Exit(2)
+	}
+	windowsIntro(yes)
 
 	var r Report
 
@@ -133,14 +130,11 @@ func main() {
 		r.SecondaryTraceroute6 = trace("anycast secondary IPv6", "2a07:a8c1::")
 	}
 
-	fmt.Print("Do you want to send this report? [Y/n]: ")
-	var resp string
-	fmt.Scanln(&resp)
-	if resp != "" && resp[0] != 'y' && resp[0] != 'Y' {
+	send, contact := confirmReport(os.Stdout, os.Stdin, yes, email)
+	if !send {
 		return
 	}
-	fmt.Print("Optional email in case we need additional info: ")
-	fmt.Scanln(&r.Contact)
+	r.Contact = contact
 
 	b, err := json.Marshal(r)
 	if err != nil {
@@ -167,9 +161,60 @@ func main() {
 	j := json.NewDecoder(res.Body)
 	_ = j.Decode(&result)
 	fmt.Printf("Posted: https://nextdns.io/diag/%s\n", result.ID)
-	if runtime.GOOS == "windows" {
-		fmt.Scanln()
+	windowsPause(yes)
+}
+
+func parseCLI(args []string) (yes bool, email string, err error) {
+	fs := flag.NewFlagSet("diag", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	y := fs.Bool("y", false, "send the report without prompting")
+	e := fs.String("email", "", "contact email to include when sending the report")
+	if err := fs.Parse(args); err != nil {
+		return false, "", err
 	}
+	return *y, *e, nil
+}
+
+func windowsIntro(yes bool) {
+	if runtime.GOOS != "windows" || yes {
+		return
+	}
+	fmt.Println("")
+	fmt.Println("Welcome to NextDNS network diagnostic tool.")
+	fmt.Println("")
+	fmt.Println("This tool will capture latency and routing information regarding")
+	fmt.Println("the connectivity of your network with NextDNS.")
+	fmt.Println("")
+	fmt.Println("The source code of this tool is available at https://github.com/nextdns/diag")
+	fmt.Println("")
+	fmt.Println("Do you want to continue? (press enter to accept)")
+	fmt.Scanln()
+}
+
+func windowsPause(yes bool) {
+	if runtime.GOOS != "windows" || yes {
+		return
+	}
+	fmt.Scanln()
+}
+
+// confirmReport asks before uploading. -y skips the questions so an RMM job
+// cannot block on stdin. An empty answer still means yes, matching the prompt.
+func confirmReport(out io.Writer, in io.Reader, yes bool, email string) (bool, string) {
+	if yes {
+		return true, email
+	}
+	fmt.Fprint(out, "Do you want to send this report? [Y/n]: ")
+	var resp string
+	_, _ = fmt.Fscanln(in, &resp)
+	if resp != "" && resp[0] != 'y' && resp[0] != 'Y' {
+		return false, ""
+	}
+	if email == "" {
+		fmt.Fprint(out, "Optional email in case we need additional info: ")
+		_, _ = fmt.Fscanln(in, &email)
+	}
+	return true, email
 }
 
 func hasIPv6() bool {
