@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,11 +12,25 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nextdns/diag/traceroute"
 	"github.com/nextdns/nextdns/host"
 )
+
+const diagnosticEndpoint = "https://api.nextdns.io/diagnostic"
+
+// Public resolvers used only to deliver the report when the system
+// resolver cannot. The diagnostic itself still queries through the
+// resolver under test.
+var bootstrapDNSServers = []string{
+	"1.1.1.1",
+	"8.8.8.8",
+	"9.9.9.9",
+	"2606:4700:4700::1111",
+	"2001:4860:4860::8888",
+}
 
 type Report struct {
 	Contact   string `json:",omitempty"`
@@ -100,13 +115,18 @@ func main() {
 
 	var r Report
 
-	if r.Resolvers = host.DNS(); len(r.Resolvers) > 0 {
+	rawResolvers := host.DNS()
+	r.Resolvers = normalizeResolvers(rawResolvers)
+	if len(r.Resolvers) == 0 {
+		// Keep the raw values in the report when none of them are usable addresses.
+		r.Resolvers = rawResolvers
+	} else {
 		fmt.Println("Resolvers: ", strings.Join(r.Resolvers, ", "))
+		// Query the literal system resolvers. host.DNS sometimes returns every
+		// address in one string ("45.90.28.219 45.90.30.219"); dialing that
+		// string makes the final POST fail with "no such host" or a lookup timeout.
 		net.DefaultResolver.PreferGo = true
-		d := &net.Dialer{}
-		net.DefaultResolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
-			return d.DialContext(ctx, network, net.JoinHostPort(r.Resolvers[0], "53"))
-		}
+		net.DefaultResolver.Dial = fixedDNSDial(r.Resolvers)
 	}
 
 	r.HasV6 = hasIPv6()
@@ -148,27 +168,206 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Print("Posting...\r")
-	req, _ := http.NewRequest("POST", "https://api.nextdns.io/diagnostic", bytes.NewBuffer(b))
-	req.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	id, err := postDiagnostic(b)
 	if err != nil {
+		var status *postStatusError
+		if errors.As(err, &status) {
+			fmt.Printf("Post unsuccessful: status %d\n", status.code)
+			fmt.Fprint(os.Stderr, status.body)
+			os.Exit(1)
+		}
 		fmt.Printf("Post unsuccessful: %v\n", err)
 		fmt.Println("Please report this issue on https://github.com/nextdns/diag")
 		os.Exit(1)
 	}
-	if res.StatusCode != http.StatusOK {
-		fmt.Printf("Post unsuccessful: status %d\n", res.StatusCode)
-		_, _ = io.Copy(os.Stderr, res.Body)
-		os.Exit(1)
-	}
-	result := struct {
-		ID string
-	}{}
-	j := json.NewDecoder(res.Body)
-	_ = j.Decode(&result)
-	fmt.Printf("Posted: https://nextdns.io/diag/%s\n", result.ID)
+	fmt.Printf("Posted: https://nextdns.io/diag/%s\n", id)
 	if runtime.GOOS == "windows" {
 		fmt.Scanln()
+	}
+}
+
+// normalizeResolvers splits resolver lists into individual IP addresses.
+// macOS ipconfig and systemd lease files report every server in one string,
+// separated by spaces. Dialing that whole string is not a DNS lookup.
+func normalizeResolvers(in []string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, item := range in {
+		for _, field := range strings.Fields(strings.ReplaceAll(item, ",", " ")) {
+			ip := net.ParseIP(field)
+			if ip == nil {
+				continue
+			}
+			s := ip.String()
+			if _, ok := seen[s]; ok {
+				continue
+			}
+			seen[s] = struct{}{}
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// literalDialer connects only to IP literals. A hostname here would be
+// resolved by DefaultResolver and call back into this dialer.
+func literalDialer() *net.Dialer {
+	return &net.Dialer{
+		Timeout: 5 * time.Second,
+		Resolver: &net.Resolver{
+			PreferGo: true,
+			Dial: func(context.Context, string, string) (net.Conn, error) {
+				return nil, errors.New("dns server address must be a literal ip")
+			},
+		},
+	}
+}
+
+// fixedDNSDial always queries the first system resolver. The address argument
+// is the nameserver from resolv.conf, which is intentionally not used: on
+// some platforms that file is not the resolver the host is actually using.
+func fixedDNSDial(servers []string) func(context.Context, string, string) (net.Conn, error) {
+	return dnsDial(servers, "53", false)
+}
+
+func rotatingDNSDial(servers []string) func(context.Context, string, string) (net.Conn, error) {
+	return dnsDial(servers, "53", true)
+}
+
+func dnsDial(servers []string, port string, rotate bool) func(context.Context, string, string) (net.Conn, error) {
+	var mu sync.Mutex
+	var n int
+	d := literalDialer()
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		if len(servers) == 0 {
+			return nil, errors.New("no dns servers")
+		}
+		server := servers[0]
+		if rotate {
+			mu.Lock()
+			server = servers[n%len(servers)]
+			n++
+			mu.Unlock()
+		}
+		return d.DialContext(ctx, network, net.JoinHostPort(server, port))
+	}
+}
+
+type postStatusError struct {
+	code int
+	body string
+}
+
+func (e *postStatusError) Error() string {
+	return fmt.Sprintf("status %d", e.code)
+}
+
+func shouldRetryPost(err error) bool {
+	if err == nil {
+		return false
+	}
+	var status *postStatusError
+	if errors.As(err, &status) {
+		return false
+	}
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func postDiagnostic(body []byte) (string, error) {
+	return postWithClients(body, diagnosticEndpoint, []*http.Client{
+		{Timeout: 30 * time.Second},
+		bootstrapClient(),
+	})
+}
+
+func postWithClients(body []byte, endpoint string, clients []*http.Client) (string, error) {
+	var first error
+	for i, client := range clients {
+		id, err := postJSON(client, endpoint, body)
+		if err == nil {
+			return id, nil
+		}
+		if i == 0 {
+			first = err
+		}
+		if i == len(clients)-1 || !shouldRetryPost(err) {
+			if i > 0 && first != nil {
+				return "", fmt.Errorf("%v; fallback: %v", first, err)
+			}
+			return "", err
+		}
+		fmt.Println("Post failed, retrying via public DNS...")
+	}
+	return "", errors.New("no http client")
+}
+
+func postJSON(client *http.Client, endpoint string, body []byte) (string, error) {
+	req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		msg, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return "", &postStatusError{code: res.StatusCode, body: string(msg)}
+	}
+	var result struct {
+		ID string
+	}
+	_ = json.NewDecoder(res.Body).Decode(&result)
+	return result.ID, nil
+}
+
+func bootstrapClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	resolver := &net.Resolver{
+		PreferGo: true,
+		Dial:     rotatingDNSDial(bootstrapDNSServers),
+	}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+				name, port, err := net.SplitHostPort(address)
+				if err != nil {
+					return nil, err
+				}
+				if name != "api.nextdns.io" {
+					return dialer.DialContext(ctx, network, address)
+				}
+				ips, err := resolver.LookupIP(ctx, "ip", name)
+				if err != nil {
+					return nil, err
+				}
+				var last error
+				for _, ip := range ips {
+					conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+					if err == nil {
+						return conn, nil
+					}
+					last = err
+				}
+				if last == nil {
+					last = fmt.Errorf("no ip for %s", name)
+				}
+				return nil, last
+			},
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
 	}
 }
 
