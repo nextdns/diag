@@ -80,7 +80,7 @@ func (p Ping) String() string {
 	return fmt.Sprintf("%s: %s", p.Pop, p.RTT)
 }
 
-type RouterTarget struct {
+type ServerTarget struct {
 	IPs []string
 }
 
@@ -283,7 +283,7 @@ func pings(v6 bool) []Ping {
 		return nil
 	}
 	defer res.Body.Close()
-	var targets []RouterTarget
+	var targets []ServerTarget
 	j := json.NewDecoder(res.Body)
 	if err := j.Decode(&targets); err != nil {
 		fmt.Printf(indent("Cannot decode response: %v\n"), err)
