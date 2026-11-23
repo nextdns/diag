@@ -47,8 +47,11 @@ func TestParseWindowsIPv4ReplyTimeout(t *testing.T) {
 
 func TestParseWindowsIPv6Reply(t *testing.T) {
 	reply := make([]byte, windowsIPv6ReplyPrefixSize)
-	ip := net.ParseIP("2001:db8::5").To16()
-	copy(reply[windowsIPv6AddressOffset:windowsIPv6AddressOffset+net.IPv6len], ip)
+	ip := net.ParseIP("2800:1e0:1060:2::4").To16()
+	// IPV6_ADDRESS_EX is packed: the address follows a 2-byte port and
+	// 4-byte flowinfo, independent of the parser's offset constant.
+	copy(reply[6:22], ip)
+	copy(reply[22:26], []byte{0x12, 0x34, 0x56, 0x78}) // scope ID
 	binary.LittleEndian.PutUint32(reply[windowsIPv6StatusOffset:windowsIPv6StatusOffset+4], windowsIPSuccess)
 	binary.LittleEndian.PutUint32(reply[windowsIPv6RTTOffset:windowsIPv6RTTOffset+4], 9)
 

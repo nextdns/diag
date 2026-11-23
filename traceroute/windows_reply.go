@@ -16,7 +16,8 @@ const (
 	windowsIPv4ReplyPrefixSize = 28
 	windowsIPv6ReplyPrefixSize = 36
 
-	windowsIPv6AddressOffset = 8
+	// IPV6_ADDRESS_EX is packed: port (2 bytes), flowinfo (4), address (16).
+	windowsIPv6AddressOffset = 6
 	windowsIPv6StatusOffset  = 28
 	windowsIPv6RTTOffset     = 32
 )
